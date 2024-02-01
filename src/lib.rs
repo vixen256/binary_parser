@@ -243,7 +243,7 @@ impl BinaryParser {
 
 	pub fn align_write(&mut self, alignment: u64) -> Result<()> {
 		while self.position() & (alignment - 1) != 0 {
-			self.write_u32(0)?;
+			self.write_u8(0)?;
 		}
 		Ok(())
 	}
