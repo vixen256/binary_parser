@@ -15,6 +15,7 @@ pub enum BinaryParserError {
 	Utf8(#[from] std::str::Utf8Error),
 }
 
+#[derive(Default)]
 pub struct BinaryParser {
 	inner: Cursor<Vec<u8>>,
 	bases: Vec<u64>,
@@ -62,18 +63,18 @@ macro_rules! int_impl {
 				} else {
 					$ty::to_le_bytes(data)
 				};
-				self.inner.write(&buf)?;
+				self.inner.write_all(&buf)?;
 				Ok(())
 			}
 
-			pub fn [< write_ $ty _array >] (&mut self, data: &Vec<$ty>) -> Result<()> {
+			pub fn [< write_ $ty _array >] (&mut self, data: &[$ty]) -> Result<()> {
 				for elem in data {
 					let buf = if self.big_endian {
 						$ty::to_be_bytes(*elem)
 					} else {
 						$ty::to_le_bytes(*elem)
 					};
-					self.inner.write(&buf)?;
+					self.inner.write_all(&buf)?;
 				}
 				Ok(())
 			}
@@ -117,7 +118,7 @@ impl BinaryParser {
 	pub fn to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
 		self.finish_writes()?;
 		let mut file = std::fs::File::create(path)?;
-		file.write(self.inner.get_ref())?;
+		file.write_all(self.inner.get_ref())?;
 		Ok(())
 	}
 
@@ -158,38 +159,32 @@ impl BinaryParser {
 	}
 
 	pub fn read_string(&mut self, length: usize) -> Result<String> {
-		let mut buf = Vec::with_capacity(length);
-		for _ in 0..length {
-			buf.push(0);
-		}
+		let mut buf = vec![0; length];
 		self.inner.read_exact(&mut buf)?;
 		Ok(String::from(std::str::from_utf8(&buf)?))
 	}
 
 	pub fn write_string(&mut self, data: &str) -> Result<()> {
 		let buf = data.as_bytes();
-		self.inner.write(&buf)?;
+		self.inner.write_all(buf)?;
 		Ok(())
 	}
 
 	pub fn write_null_string(&mut self, data: &str) -> Result<()> {
 		let buf = data.as_bytes();
-		self.inner.write(&buf)?;
+		self.inner.write_all(buf)?;
 		self.write_u8(0)?;
 		Ok(())
 	}
 
 	pub fn read_buf(&mut self, length: usize) -> Result<Vec<u8>> {
-		let mut buf = Vec::with_capacity(length);
-		for _ in 0..length {
-			buf.push(0);
-		}
+		let mut buf = vec![0; length];
 		self.inner.read_exact(&mut buf)?;
 		Ok(buf)
 	}
 
-	pub fn write_buf(&mut self, data: &Vec<u8>) -> Result<()> {
-		self.inner.write(&data)?;
+	pub fn write_buf(&mut self, data: &[u8]) -> Result<()> {
+		self.inner.write_all(data)?;
 		Ok(())
 	}
 
@@ -243,7 +238,7 @@ impl BinaryParser {
 	}
 
 	pub fn pending_writes(&self) -> bool {
-		self.scheduled_writes.len() > 0
+		!self.scheduled_writes.is_empty()
 	}
 
 	pub fn finish_writes(&mut self) -> Result<()> {
