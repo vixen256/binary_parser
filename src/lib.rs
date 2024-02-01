@@ -230,4 +230,21 @@ impl BinaryParser {
 		}
 		Ok(())
 	}
+
+	pub fn align_seek(&mut self, alignment: u64) -> Result<()> {
+		let pos = self.position();
+		let offset = if pos & (alignment - 1) != 0 {
+			(pos & !(alignment - 1)) + alignment
+		} else {
+			pos
+		};
+		self.seek(SeekFrom::Start(offset))
+	}
+
+	pub fn align_write(&mut self, alignment: u64) -> Result<()> {
+		while self.position() & (alignment - 1) != 0 {
+			self.write_u32(0)?;
+		}
+		Ok(())
+	}
 }
