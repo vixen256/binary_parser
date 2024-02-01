@@ -41,6 +41,21 @@ macro_rules! int_impl {
 				Ok(val)
 			}
 
+			pub fn [< read_ $ty _array >] (&mut self, count: u64) -> Result<Vec<$ty>> {
+				let mut data = vec![];
+				for _ in 0..count {
+					let mut buf: [u8; $bytes] = [0; $bytes];
+					self.inner.read_exact(&mut buf)?;
+					let val = if self.big_endian {
+						$ty::from_be_bytes(buf)
+					} else {
+						$ty::from_le_bytes(buf)
+					};
+					data.push(val);
+				}
+				Ok(data)
+			}
+
 			pub fn [< write_ $ty >] (&mut self, data: $ty) -> Result<()> {
 				let buf = if self.big_endian {
 					$ty::to_be_bytes(data)
@@ -48,6 +63,18 @@ macro_rules! int_impl {
 					$ty::to_le_bytes(data)
 				};
 				self.inner.write(&buf)?;
+				Ok(())
+			}
+
+			pub fn [< write_ $ty _array >] (&mut self, data: &Vec<$ty>) -> Result<()> {
+				for elem in data {
+					let buf = if self.big_endian {
+						$ty::to_be_bytes(*elem)
+					} else {
+						$ty::to_le_bytes(*elem)
+					};
+					self.inner.write(&buf)?;
+				}
 				Ok(())
 			}
 		}
