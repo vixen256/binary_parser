@@ -164,6 +164,10 @@ impl BinaryParser {
 		Ok(String::from(std::str::from_utf8(&buf)?))
 	}
 
+	pub fn read_null_string_pointer(&mut self) -> Result<String> {
+		self.read_pointer(|reader| reader.read_null_string())
+	}
+
 	pub fn write_string(&mut self, data: &str) -> Result<()> {
 		let buf = data.as_bytes();
 		self.inner.write_all(buf)?;
@@ -174,6 +178,16 @@ impl BinaryParser {
 		let buf = data.as_bytes();
 		self.inner.write_all(buf)?;
 		self.write_u8(0)?;
+		Ok(())
+	}
+
+	pub fn write_null_string_pointer(&mut self, data: &str) -> Result<()> {
+		let buf = data.as_bytes().to_vec();
+		self.write_pointer(move |writer| {
+			writer.inner.write_all(&buf)?;
+			writer.write_u8(0)?;
+			Ok(())
+		})?;
 		Ok(())
 	}
 
