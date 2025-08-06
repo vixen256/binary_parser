@@ -16,15 +16,15 @@ pub enum BinaryParserError {
 }
 
 #[derive(Default)]
-pub struct BinaryParser {
+pub struct BinaryParser<'a> {
 	inner: Cursor<Vec<u8>>,
 	bases: Vec<u64>,
-	scheduled_writes: VecDeque<ScheduledWrite>,
+	scheduled_writes: VecDeque<ScheduledWrite<'a>>,
 	big_endian: bool,
 }
 
-struct ScheduledWrite {
-	func: Box<dyn FnOnce(&mut BinaryParser) -> Result<()>>,
+struct ScheduledWrite<'a> {
+	func: Box<dyn FnOnce(&mut BinaryParser<'a>) -> Result<()> + 'a>,
 	position: u64,
 }
 
@@ -82,7 +82,7 @@ macro_rules! int_impl {
 	};
 }
 
-impl BinaryParser {
+impl<'a> BinaryParser<'a> {
 	pub fn new() -> Self {
 		Self {
 			inner: Cursor::new(vec![]),
@@ -115,16 +115,16 @@ impl BinaryParser {
 		self.big_endian = be;
 	}
 
-	pub fn to_file<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
-		self.finish_writes()?;
+	pub fn to_file<P: AsRef<Path>>(self, path: P) -> Result<()> {
+		let parser = self.finish_writes()?;
 		let mut file = std::fs::File::create(path)?;
-		file.write_all(self.inner.get_ref())?;
+		file.write_all(parser.inner.get_ref())?;
 		Ok(())
 	}
 
-	pub fn to_buf(&mut self) -> Result<&Vec<u8>> {
-		self.finish_writes()?;
-		Ok(self.inner.get_ref())
+	pub fn to_buf(self) -> Result<Vec<u8>> {
+		let parser = self.finish_writes()?;
+		Ok(parser.inner.into_inner())
 	}
 
 	// Returns None if writes are still pending
@@ -207,8 +207,9 @@ impl BinaryParser {
 		Ok(Self::from_buf(buf))
 	}
 
-	pub fn write_parser(&mut self, parser: &mut Self) -> Result<()> {
-		self.write_buf(parser.to_buf()?)
+	pub fn write_parser(&mut self, parser: Self) -> Result<()> {
+		let new = parser.to_buf()?;
+		self.write_buf(&new)
 	}
 
 	pub fn seek(&mut self, pos: SeekFrom) -> Result<()> {
@@ -239,7 +240,7 @@ impl BinaryParser {
 
 	pub fn write_pointer<F>(&mut self, func: F) -> Result<()>
 	where
-		F: FnOnce(&mut Self) -> Result<()> + 'static,
+		F: FnOnce(&mut Self) -> Result<()> + 'a,
 	{
 		let position = self.position();
 		self.scheduled_writes.push_back(ScheduledWrite {
@@ -255,16 +256,22 @@ impl BinaryParser {
 		!self.scheduled_writes.is_empty()
 	}
 
-	pub fn finish_writes(&mut self) -> Result<()> {
-		while let Some(write) = self.scheduled_writes.pop_front() {
-			let pos = self.position();
-			(write.func)(self)?;
-			let new_pos = self.position();
-			self.seek(SeekFrom::Start(write.position))?;
-			self.write_u32(pos as u32)?;
-			self.seek(SeekFrom::Start(new_pos))?;
+	pub fn finish_writes(self) -> Result<Self> {
+		let mut new = Self {
+			bases: self.bases,
+			big_endian: self.big_endian,
+			inner: self.inner,
+			scheduled_writes: VecDeque::new(),
+		};
+		for write in self.scheduled_writes {
+			let pos = new.position();
+			(write.func)(&mut new)?;
+			let new_pos = new.position();
+			new.seek(SeekFrom::Start(write.position))?;
+			new.write_u32(pos as u32)?;
+			new.seek(SeekFrom::Start(new_pos))?;
 		}
-		Ok(())
+		Ok(new)
 	}
 
 	pub fn align_seek(&mut self, alignment: u64) -> Result<()> {
