@@ -290,4 +290,11 @@ impl<'a> BinaryParser<'a> {
 		}
 		Ok(())
 	}
+
+	pub fn align_write_value(&mut self, alignment: u64, value: u8) -> Result<()> {
+		while self.position() & (alignment - 1) != 0 {
+			self.write_u8(value)?;
+		}
+		Ok(())
+	}
 }
