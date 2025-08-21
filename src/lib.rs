@@ -18,7 +18,6 @@ pub enum BinaryParserError {
 #[derive(Default)]
 pub struct BinaryParser<'a> {
 	inner: Cursor<Vec<u8>>,
-	bases: Vec<u64>,
 	scheduled_writes: VecDeque<ScheduledWrite<'a>>,
 	big_endian: bool,
 }
@@ -26,6 +25,7 @@ pub struct BinaryParser<'a> {
 struct ScheduledWrite<'a> {
 	func: Box<dyn FnOnce(&mut BinaryParser<'a>) -> Result<()> + 'a>,
 	position: u64,
+	offset: u64,
 }
 
 macro_rules! int_impl {
@@ -86,7 +86,6 @@ impl<'a> BinaryParser<'a> {
 	pub fn new() -> Self {
 		Self {
 			inner: Cursor::new(vec![]),
-			bases: vec![],
 			scheduled_writes: VecDeque::new(),
 			big_endian: false,
 		}
@@ -96,7 +95,6 @@ impl<'a> BinaryParser<'a> {
 		let buf = std::fs::read(path)?;
 		Ok(Self {
 			inner: Cursor::new(buf),
-			bases: vec![],
 			scheduled_writes: VecDeque::new(),
 			big_endian: false,
 		})
@@ -105,7 +103,6 @@ impl<'a> BinaryParser<'a> {
 	pub fn from_buf<B: Into<Vec<u8>>>(buf: B) -> Self {
 		Self {
 			inner: Cursor::new(buf.into()),
-			bases: vec![],
 			scheduled_writes: VecDeque::new(),
 			big_endian: false,
 		}
@@ -217,21 +214,24 @@ impl<'a> BinaryParser<'a> {
 		Ok(())
 	}
 
-	pub fn push_base(&mut self) {
-		self.bases.push(self.position());
-	}
-
-	pub fn pop_base(&mut self) {
-		self.bases.pop();
-	}
-
 	pub fn read_pointer<T, F>(&mut self, func: F) -> Result<T>
 	where
 		F: FnOnce(&mut Self) -> Result<T>,
 	{
 		let pos = self.position() + 4;
 		let offset = self.read_u32()? as u64;
-		let offset = offset + self.bases.last().unwrap_or(&0);
+		self.seek(SeekFrom::Start(offset))?;
+		let res = func(self);
+		self.seek(SeekFrom::Start(pos))?;
+		res
+	}
+
+	pub fn read_pointer_offset<T, F>(&mut self, func: F, offset: u64) -> Result<T>
+	where
+		F: FnOnce(&mut Self) -> Result<T>,
+	{
+		let pos = self.position() + 4;
+		let offset = self.read_u32()? as u64 + offset;
 		self.seek(SeekFrom::Start(offset))?;
 		let res = func(self);
 		self.seek(SeekFrom::Start(pos))?;
@@ -246,6 +246,22 @@ impl<'a> BinaryParser<'a> {
 		self.scheduled_writes.push_back(ScheduledWrite {
 			func: Box::new(func),
 			position,
+			offset: 0,
+		});
+		self.seek(SeekFrom::Current(4))?;
+
+		Ok(())
+	}
+
+	pub fn write_pointer_offset<F>(&mut self, func: F, offset: u64) -> Result<()>
+	where
+		F: FnOnce(&mut Self) -> Result<()> + 'a,
+	{
+		let position = self.position();
+		self.scheduled_writes.push_back(ScheduledWrite {
+			func: Box::new(func),
+			position,
+			offset,
 		});
 		self.seek(SeekFrom::Current(4))?;
 
@@ -258,7 +274,6 @@ impl<'a> BinaryParser<'a> {
 
 	pub fn finish_writes(self) -> Result<Self> {
 		let mut new = Self {
-			bases: self.bases,
 			big_endian: self.big_endian,
 			inner: self.inner,
 			scheduled_writes: VecDeque::new(),
@@ -268,7 +283,7 @@ impl<'a> BinaryParser<'a> {
 			(write.func)(&mut new)?;
 			let new_pos = new.position();
 			new.seek(SeekFrom::Start(write.position))?;
-			new.write_u32(pos as u32)?;
+			new.write_u32((pos - write.offset) as u32)?;
 			new.seek(SeekFrom::Start(new_pos))?;
 		}
 		Ok(new)
