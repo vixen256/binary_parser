@@ -272,19 +272,25 @@ impl<'a> BinaryParser<'a> {
 		!self.scheduled_writes.is_empty()
 	}
 
-	pub fn finish_writes(self) -> Result<Self> {
+	pub fn finish_writes(mut self) -> Result<Self> {
 		let mut new = Self {
 			big_endian: self.big_endian,
 			inner: self.inner,
 			scheduled_writes: VecDeque::new(),
 		};
-		for write in self.scheduled_writes {
+		let mut next_write = self.scheduled_writes.pop_front();
+		while let Some(write) = next_write {
 			let pos = new.position();
 			(write.func)(&mut new)?;
 			let new_pos = new.position();
 			new.seek(SeekFrom::Start(write.position))?;
 			new.write_u32((pos - write.offset) as u32)?;
 			new.seek(SeekFrom::Start(new_pos))?;
+
+			next_write = self
+				.scheduled_writes
+				.pop_front()
+				.map_or(new.scheduled_writes.pop_front(), |v| Some(v));
 		}
 		Ok(new)
 	}
