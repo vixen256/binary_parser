@@ -278,19 +278,17 @@ impl<'a> BinaryParser<'a> {
 			inner: self.inner,
 			scheduled_writes: VecDeque::new(),
 		};
-		let mut next_write = self.scheduled_writes.pop_front();
-		while let Some(write) = next_write {
+		while let Some(write) = self
+			.scheduled_writes
+			.pop_front()
+			.map_or_else(|| new.scheduled_writes.pop_front(), |v| Some(v))
+		{
 			let pos = new.position();
 			(write.func)(&mut new)?;
 			let new_pos = new.position();
 			new.seek(SeekFrom::Start(write.position))?;
 			new.write_u32((pos - write.offset) as u32)?;
 			new.seek(SeekFrom::Start(new_pos))?;
-
-			next_write = self
-				.scheduled_writes
-				.pop_front()
-				.map_or(new.scheduled_writes.pop_front(), |v| Some(v));
 		}
 		Ok(new)
 	}
